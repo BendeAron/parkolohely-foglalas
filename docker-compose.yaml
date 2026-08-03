@@ -1,7 +1,9 @@
+version: '3.8'
+
 services:
-  # 1. PostgreSQL Adatbázis
+  # 1. Adatbázis (PostgreSQL)
   db:
-    image: postgres:16-alpine
+    image: postgres:15-alpine
     container_name: parkolo_db_container
     restart: always
     environment:
@@ -12,10 +14,15 @@ services:
       - "5432:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
+      # Automatikus séma és seed futtatás az ELSŐ indításkor
+      - ./schema.sql:/docker-entrypoint-initdb.d/01_schema.sql
+      - ./seed.sql:/docker-entrypoint-initdb.d/02_seed.sql
 
-  # 2. PHP REST API
+  # 2. PHP Backend
   backend:
-    build: ./backend
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
     container_name: parkolo_backend_container
     restart: always
     ports:
@@ -26,10 +33,28 @@ services:
       DB_NAME: parkolo_db
       DB_USER: postgres
       DB_PASS: postgrespassword
-    depends_on:
-      - db
     volumes:
       - ./backend:/var/www/html
+    depends_on:
+      - db
+
+  # 3. React Frontend (A gyökérkönyvtárból épül)
+  frontend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: parkolo_frontend_container
+    restart: always
+    ports:
+      - "5173:5173"
+    environment:
+      - VITE_API_BASE_URL=http://localhost:8000
+    volumes:
+      - .:/app
+      - /app/node_modules
+      - /app/backend
+    depends_on:
+      - backend
 
 volumes:
   pgdata:
