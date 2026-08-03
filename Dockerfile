@@ -1,4 +1,8 @@
-FROM node:18-alpine
+# cseréld ki ezt:
+# FROM node:18-alpine
+
+# erre:
+FROM node:20-alpine
 
 WORKDIR /app
 
