@@ -1,0 +1,35 @@
+services:
+  # 1. PostgreSQL Adatbázis
+  db:
+    image: postgres:16-alpine
+    container_name: parkolo_db_container
+    restart: always
+    environment:
+      POSTGRES_DB: parkolo_db
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgrespassword
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+
+  # 2. PHP REST API
+  backend:
+    build: ./backend
+    container_name: parkolo_backend_container
+    restart: always
+    ports:
+      - "8000:8000"
+    environment:
+      DB_HOST: db
+      DB_PORT: 5432
+      DB_NAME: parkolo_db
+      DB_USER: postgres
+      DB_PASS: postgrespassword
+    depends_on:
+      - db
+    volumes:
+      - ./backend:/var/www/html
+
+volumes:
+  pgdata:
