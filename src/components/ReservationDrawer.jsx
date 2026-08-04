@@ -1,14 +1,16 @@
 import { useEffect, useRef, useState } from "react";
-import { Loader2, X } from "lucide-react";
+import { Loader2, MoonStar, X } from "lucide-react";
 import SpotSchedule from "./SpotSchedule";
 import {
   DISCOUNTS,
-  EVENING_DISCOUNT_FROM_HOUR,
-  isEveningEligible,
+  EVENING_WINDOW_END_HOUR,
+  EVENING_WINDOW_START_HOUR,
   money,
   quotePrice,
   readableTime,
+  SELECTABLE_DISCOUNTS,
   SPOT_TYPES,
+  validateRange,
 } from "../lib/format";
 
 /**
@@ -50,7 +52,7 @@ export default function ReservationDrawer({ spot, range, onClose, onSubmit, subm
   if (!spot) return null;
 
   const bookable = spot.is_available;
-  const eveningBlocked = discountType === "evening" && !isEveningEligible(range.start);
+  const rangeCheck = validateRange(range.start, range.end);
   const plate = licensePlate.trim().toUpperCase();
   const plateValid = /^[A-Z0-9 -]{2,15}$/.test(plate);
 
@@ -61,7 +63,7 @@ export default function ReservationDrawer({ spot, range, onClose, onSubmit, subm
     discountType,
   });
 
-  const canSubmit = plateValid && !eveningBlocked && quote.hours > 0 && !submitting;
+  const canSubmit = plateValid && rangeCheck.ok && quote.hours > 0 && !submitting;
 
   const handleSubmit = () => {
     setTouched(true);
@@ -181,8 +183,10 @@ export default function ReservationDrawer({ spot, range, onClose, onSubmit, subm
               <div>
                 <span className={label}>Discount</span>
                 <div className="grid grid-cols-2 gap-2">
-                  {Object.entries(DISCOUNTS).map(([key, { label: name, rate }]) => {
+                  {SELECTABLE_DISCOUNTS.map((key) => {
+                    const { label: name, rate } = DISCOUNTS[key];
                     const active = discountType === key;
+                    const overridden = quote.autoEvening;
 
                     return (
                       <button
@@ -191,9 +195,11 @@ export default function ReservationDrawer({ spot, range, onClose, onSubmit, subm
                         onClick={() => setDiscountType(key)}
                         className={`border px-3 py-2 text-left transition-colors
                                     focus:outline-none focus-visible:ring-2 focus-visible:ring-[#F5C518] ${
-                                      active
+                                      active && !overridden
                                         ? "border-[#F5C518] bg-[#F5C518]/10 text-[#F5C518]"
-                                        : "border-[#39424A] text-[#8A959C] hover:border-[#5A646B] hover:text-[#D7DCDE]"
+                                        : active
+                                          ? "border-[#5A646B] text-[#8A959C]"
+                                          : "border-[#39424A] text-[#8A959C] hover:border-[#5A646B] hover:text-[#D7DCDE]"
                                     }`}
                       >
                         <span className="block font-['Barlow_Condensed'] text-sm font-bold uppercase tracking-[0.12em]">
@@ -207,10 +213,20 @@ export default function ReservationDrawer({ spot, range, onClose, onSubmit, subm
                   })}
                 </div>
 
-                {eveningBlocked && (
-                  <p className="mt-2 text-sm text-[#E45B5B]">
-                    The evening discount needs an arrival at {EVENING_DISCOUNT_FROM_HOUR}:00
-                    or later. Pick another discount or move your arrival time.
+                {quote.autoEvening ? (
+                  <p className="mt-2 flex items-start gap-2 border border-[#4CD07D]/40 bg-[#4CD07D]/5 px-3 py-2 text-sm text-[#4CD07D]">
+                    <MoonStar size={14} className="mt-0.5 shrink-0" aria-hidden="true" />
+                    <span>
+                      Overnight rate applied automatically —{" "}
+                      {Math.round(DISCOUNTS.evening.rate * 100)}% off. It beats the
+                      discounts above, so you're getting the better price.
+                    </span>
+                  </p>
+                ) : (
+                  <p className="mt-2 text-xs text-[#5A646B]">
+                    Park entirely between {EVENING_WINDOW_START_HOUR}:00 and{" "}
+                    {String(EVENING_WINDOW_END_HOUR).padStart(2, "0")}:00 and the overnight
+                    rate applies on its own.
                   </p>
                 )}
               </div>
@@ -227,7 +243,10 @@ export default function ReservationDrawer({ spot, range, onClose, onSubmit, subm
 
                   {quote.discount > 0 && (
                     <div className="flex justify-between text-[#4CD07D]">
-                      <span>{DISCOUNTS[discountType].label}</span>
+                      <span>
+                        {DISCOUNTS[quote.appliedType].label}
+                        {quote.autoEvening ? " (automatic)" : ""}
+                      </span>
                       <span>{"\u2212"}{money(quote.discount)}</span>
                     </div>
                   )}
@@ -246,6 +265,12 @@ export default function ReservationDrawer({ spot, range, onClose, onSubmit, subm
                   Charged per started hour.
                 </p>
               </div>
+
+              {!rangeCheck.ok && (
+                <p role="alert" className="text-sm text-[#E45B5B]">
+                  {rangeCheck.error} Adjust the times above and check availability again.
+                </p>
+              )}
 
               <button
                 type="button"

@@ -1,14 +1,36 @@
+import { useEffect, useState } from "react";
 import { ArrowRight, Clock, RefreshCw } from "lucide-react";
+import { MAX_RESERVATION_DAYS, toInputValue } from "../lib/format";
 
 /**
  * The entrance sign: pick your arrival and departure, then check the board.
+ *
+ * `min` on both inputs blocks past times in the picker UI. It's a
+ * convenience, not a guarantee — the value is still typeable and the server
+ * revalidates, which is why `validation` is passed in rather than trusted here.
  */
-export default function TimeRangeBar({ range, onChange, onCheck, loading, invalid }) {
+export default function TimeRangeBar({ range, onChange, onCheck, loading, validation }) {
+  // Refreshed each minute so `min` doesn't go stale on a long-open tab.
+  const [now, setNow] = useState(() => toInputValue(new Date()));
+
+  useEffect(() => {
+    const timer = setInterval(() => setNow(toInputValue(new Date())), 60_000);
+    return () => clearInterval(timer);
+  }, []);
+
+  const maxEnd = range.start
+    ? toInputValue(
+        new Date(new Date(range.start).getTime() + MAX_RESERVATION_DAYS * 86_400_000),
+      )
+    : undefined;
+
   const field =
     "w-full bg-[#14171A] border border-[#39424A] text-[#D7DCDE] " +
     "font-['IBM_Plex_Mono'] text-sm px-3 py-2.5 " +
     "focus:outline-none focus:border-[#F5C518] focus:ring-1 focus:ring-[#F5C518] " +
     "[color-scheme:dark]";
+
+  const invalid = !validation.ok;
 
   return (
     <section className="border border-[#39424A] bg-[#1D2125]">
@@ -17,6 +39,9 @@ export default function TimeRangeBar({ range, onChange, onCheck, loading, invali
         <h2 className="font-['Barlow_Condensed'] text-sm font-bold uppercase tracking-[0.18em] text-[#8A959C]">
           When are you parking?
         </h2>
+        <span className="ml-auto font-['Barlow_Condensed'] text-xs uppercase tracking-[0.14em] text-[#5A646B]">
+          Up to {MAX_RESERVATION_DAYS} days
+        </span>
       </div>
 
       <div className="grid gap-4 p-4 sm:grid-cols-[1fr_auto_1fr_auto] sm:items-end">
@@ -32,6 +57,7 @@ export default function TimeRangeBar({ range, onChange, onCheck, loading, invali
             type="datetime-local"
             className={field}
             value={range.start}
+            min={now}
             onChange={(e) => onChange({ ...range, start: e.target.value })}
           />
         </div>
@@ -54,7 +80,8 @@ export default function TimeRangeBar({ range, onChange, onCheck, loading, invali
             type="datetime-local"
             className={field}
             value={range.end}
-            min={range.start}
+            min={range.start || now}
+            max={maxEnd}
             onChange={(e) => onChange({ ...range, end: e.target.value })}
           />
         </div>
@@ -83,7 +110,7 @@ export default function TimeRangeBar({ range, onChange, onCheck, loading, invali
           role="alert"
           className="border-t border-[#39424A] px-4 py-2 text-sm text-[#E45B5B]"
         >
-          Set a departure time later than your arrival time.
+          {validation.error}
         </p>
       )}
     </section>

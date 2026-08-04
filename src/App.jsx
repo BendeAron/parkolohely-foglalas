@@ -6,7 +6,7 @@ import ReservationDrawer from "./components/ReservationDrawer";
 import CancelDrawer from "./components/CancelDrawer";
 import ToastStack from "./components/ToastStack";
 import { createReservation, fetchSpots } from "./api";
-import { defaultRange, money, readableTime } from "./lib/format";
+import { defaultRange, money, readableTime, validateRange } from "./lib/format";
 
 export default function App() {
   const [range, setRange] = useState(defaultRange);
@@ -30,7 +30,12 @@ export default function App() {
     setToasts((current) => current.filter((t) => t.id !== id));
   }, []);
 
-  const rangeInvalid = Boolean(range.start && range.end && range.end <= range.start);
+  // One validator, shared with the drawer and mirrored on the server, so all
+  // three agree on what counts as a bookable window.
+  const validation = useMemo(
+    () => validateRange(range.start, range.end),
+    [range.start, range.end],
+  );
 
   const load = useCallback(async (windowToCheck) => {
     setLoading(true);
@@ -54,7 +59,7 @@ export default function App() {
   }, [load]);
 
   const handleCheck = () => {
-    if (rangeInvalid) return;
+    if (!validation.ok) return;
 
     setSelectedSpot(null);
     load({ start: range.start, end: range.end });
@@ -165,7 +170,7 @@ export default function App() {
           onChange={setRange}
           onCheck={handleCheck}
           loading={loading}
-          invalid={rangeInvalid}
+          validation={validation}
         />
 
         <section>

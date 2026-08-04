@@ -1,7 +1,9 @@
 /**
  * These rules mirror create_reservation.php exactly. If you change the
- * discount table or the rounding rule on the server, change it here too —
- * otherwise the preview price and the charged price drift apart.
+ * discount table, the rounding rule, the 7-day cap or the evening window on
+ * the server, change it here too — otherwise the preview and the charge drift
+ * apart. The two implementations are duplicated by necessity (PHP / JS);
+ * they are not independent sources of truth. The server always wins.
  */
 
 export const DISCOUNTS = {
@@ -11,7 +13,15 @@ export const DISCOUNTS = {
   evening: { label: "Evening", rate: 0.25 },
 };
 
-export const EVENING_DISCOUNT_FROM_HOUR = 18;
+/** What the driver can pick. `evening` is granted automatically, never chosen. */
+export const SELECTABLE_DISCOUNTS = ["none", "student", "senior"];
+
+/** The overnight window, inclusive at both edges: 18:00 → 06:00 next day. */
+export const EVENING_WINDOW_START_HOUR = 18;
+export const EVENING_WINDOW_END_HOUR = 6;
+
+export const MAX_RESERVATION_DAYS = 7;
+export const MAX_RESERVATION_MS = MAX_RESERVATION_DAYS * 24 * 3_600_000;
 
 export const SPOT_TYPES = {
   standard: { label: "Standard" },
@@ -51,25 +61,101 @@ export function billableHours(start, end) {
   return Math.max(1, Math.ceil(ms / 3_600_000));
 }
 
-export function isEveningEligible(start) {
-  if (!start) return false;
+/**
+ * True when the whole interval sits inside one 18:00 → 06:00 window.
+ * Mirrors qualifies_for_evening() in create_reservation.php.
+ */
+export function qualifiesForEvening(start, end) {
+  if (!start || !end) return false;
 
-  return new Date(start).getHours() >= EVENING_DISCOUNT_FROM_HOUR;
+  const from = new Date(start);
+  const to = new Date(end);
+
+  if (Number.isNaN(from.getTime()) || Number.isNaN(to.getTime())) return false;
+
+  const durationMinutes = Math.round((to - from) / 60_000);
+  if (durationMinutes <= 0) return false;
+
+  const startMinutes = from.getHours() * 60 + from.getMinutes();
+  const eveningOpens = EVENING_WINDOW_START_HOUR * 60;
+  const morningCloses = EVENING_WINDOW_END_HOUR * 60;
+
+  let minutesLeftInWindow;
+
+  if (startMinutes >= eveningOpens) {
+    minutesLeftInWindow = 24 * 60 + morningCloses - startMinutes;
+  } else if (startMinutes <= morningCloses) {
+    minutesLeftInWindow = morningCloses - startMinutes;
+  } else {
+    return false; // daytime
+  }
+
+  return durationMinutes <= minutesLeftInWindow;
+}
+
+/** The evening rate is granted automatically when it's worth at least as much. */
+export function resolveDiscount(requested, start, end) {
+  if (!qualifiesForEvening(start, end)) return requested;
+
+  return DISCOUNTS.evening.rate >= (DISCOUNTS[requested]?.rate ?? 0)
+    ? "evening"
+    : requested;
 }
 
 /**
- * @returns {{hours: number, subtotal: number, rate: number, discount: number, total: number}}
+ * Every reason a window can be rejected, in the order the server checks them.
+ *
+ * @returns {{ok: boolean, error: string|null}}
+ */
+export function validateRange(start, end) {
+  if (!start || !end) {
+    return { ok: false, error: "Pick an arrival and a departure time." };
+  }
+
+  const from = new Date(start);
+  const to = new Date(end);
+
+  if (Number.isNaN(from.getTime()) || Number.isNaN(to.getTime())) {
+    return { ok: false, error: "Those times aren't valid dates." };
+  }
+
+  if (to <= from) {
+    return { ok: false, error: "Set a departure time later than your arrival time." };
+  }
+
+  // 60s of slack, matching PAST_START_GRACE_SECONDS on the server.
+  if (from.getTime() < Date.now() - 60_000) {
+    return { ok: false, error: "Reservations can't start in the past." };
+  }
+
+  if (to - from > MAX_RESERVATION_MS) {
+    return { ok: false, error: `Reservations can't exceed ${MAX_RESERVATION_DAYS} days.` };
+  }
+
+  return { ok: true, error: null };
+}
+
+/**
+ * @returns {{hours, subtotal, requestedType, appliedType, autoEvening, rate, discount, total}}
  */
 export function quotePrice({ hourlyRate, start, end, discountType }) {
   const hours = billableHours(start, end);
   const subtotal = round2(hourlyRate * hours);
 
-  const eligible = discountType !== "evening" || isEveningEligible(start);
-  const rate = eligible ? (DISCOUNTS[discountType]?.rate ?? 0) : 0;
-
+  const appliedType = resolveDiscount(discountType, start, end);
+  const rate = DISCOUNTS[appliedType]?.rate ?? 0;
   const discount = round2(subtotal * rate);
 
-  return { hours, subtotal, rate, discount, total: round2(subtotal - discount) };
+  return {
+    hours,
+    subtotal,
+    requestedType: discountType,
+    appliedType,
+    autoEvening: appliedType === "evening" && discountType !== "evening",
+    rate,
+    discount,
+    total: round2(subtotal - discount),
+  };
 }
 
 function round2(value) {
@@ -77,7 +163,7 @@ function round2(value) {
 }
 
 export function money(value) {
-  return value.toLocaleString(undefined, {
+  return Number(value ?? 0).toLocaleString(undefined, {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
   });
