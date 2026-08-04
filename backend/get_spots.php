@@ -12,18 +12,6 @@
 
 declare(strict_types=1);
 
-// ------------------------------------------------------------
-// 0. CORS Headers & Preflight Handling
-// ------------------------------------------------------------
-header("Access-Control-Allow-Origin: *");
-header("Access-Control-Allow-Methods: GET, POST, OPTIONS");
-header("Access-Control-Allow-Headers: Content-Type, Authorization, X-Requested-With");
-
-if (($_SERVER['REQUEST_METHOD'] ?? '') === 'OPTIONS') {
-    http_response_code(200);
-    exit();
-}
-
 require_once __DIR__ . '/db.php';
 
 // ------------------------------------------------------------
@@ -32,11 +20,6 @@ require_once __DIR__ . '/db.php';
 if (($_SERVER['REQUEST_METHOD'] ?? '') !== 'GET') {
     json_error('Method not allowed. Use GET.', 405);
 }
-
-$rawStart = $_GET['start_time'] ?? null;
-$rawEnd   = $_GET['end_time'] ?? null;
-$startTime = null;
-$endTime   = null;
 
 // ------------------------------------------------------------
 // 2. Read + validate the optional time window
@@ -49,6 +32,40 @@ $endTime   = null;
  *
  * Returns null if the value cannot be parsed.
  */
+function parse_timestamp(string $value): ?string
+{
+    $value = trim($value);
+
+    if ($value === '') {
+        return null;
+    }
+
+    foreach (['Y-m-d H:i:s', 'Y-m-d\TH:i:s', 'Y-m-d\TH:i', 'Y-m-d H:i'] as $format) {
+        $dt = DateTime::createFromFormat($format, $value);
+
+        // createFromFormat is lenient about impossible dates (e.g. 2026-02-31),
+        // so verify no warnings or errors were raised.
+        $errors = DateTime::getLastErrors();
+        $clean  = $errors === false || ($errors['warning_count'] === 0 && $errors['error_count'] === 0);
+
+        if ($dt instanceof DateTime && $clean) {
+            return $dt->format('Y-m-d H:i:s');
+        }
+    }
+
+    // Fall back to ISO 8601 with timezone / milliseconds.
+    try {
+        return (new DateTimeImmutable($value))->format('Y-m-d H:i:s');
+    } catch (Exception) {
+        return null;
+    }
+}
+
+$rawStart = $_GET['start_time'] ?? null;
+$rawEnd   = $_GET['end_time']   ?? null;
+
+$startTime = null;
+$endTime   = null;
 
 // Treat the window as all-or-nothing: one half alone is a client bug,
 // and silently ignoring it would return misleading availability.
@@ -144,8 +161,8 @@ $spots = array_map(static function (array $row): array {
         'spot_number'  => $row['spot_number'],
         'spot_type'    => $row['spot_type'],
         'hourly_rate'  => (float) $row['hourly_rate'],
-        'is_active'    => pg_bool($row['is_active']),
-        'is_available' => pg_bool($row['is_available']),
+        'is_active'    => filter_var($row['is_active'], FILTER_VALIDATE_BOOLEAN),
+        'is_available' => filter_var($row['is_available'], FILTER_VALIDATE_BOOLEAN),
     ];
 }, $rows);
 
