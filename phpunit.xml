@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<phpunit xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:noNamespaceSchemaLocation="vendor/phpunit/phpunit/phpunit.xsd"
+         bootstrap="tests/bootstrap.php"
+         colors="true"
+         cacheDirectory=".phpunit.cache"
+         failOnWarning="true"
+         failOnRisky="true">
+
+    <testsuites>
+        <!-- Pure logic. No database, no network. -->
+        <testsuite name="unit">
+            <file>tests/PricingTest.php</file>
+        </testsuite>
+
+        <!-- Requires PostgreSQL. Skips itself if the database is unreachable. -->
+        <testsuite name="integration">
+            <file>tests/DatabaseConstraintTest.php</file>
+        </testsuite>
+    </testsuites>
+
+    <source>
+        <include>
+            <file>pricing.php</file>
+            <file>helpers.php</file>
+        </include>
+    </source>
+
+    <php>
+        <!-- Override per environment; these match docker-compose defaults. -->
+        <env name="DB_HOST" value="db"/>
+        <env name="DB_PORT" value="5432"/>
+        <env name="DB_NAME" value="parkolo_db"/>
+        <env name="DB_USER" value="postgres"/>
+    </php>
+</phpunit>
