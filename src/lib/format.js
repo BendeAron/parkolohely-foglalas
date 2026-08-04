@@ -98,3 +98,78 @@ export function readableTime(value) {
     minute: "2-digit",
   });
 }
+
+/** "14:30" */
+export function timeOnly(value) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "—";
+
+  return date.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" });
+}
+
+/** "Today", "Tomorrow", or "Mon 3 Aug" */
+export function dayLabel(value) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "—";
+
+  const midnight = (d) => new Date(d.getFullYear(), d.getMonth(), d.getDate());
+  const days = Math.round((midnight(date) - midnight(new Date())) / 86_400_000);
+
+  if (days === 0) return "Today";
+  if (days === 1) return "Tomorrow";
+
+  return date.toLocaleDateString(undefined, {
+    weekday: "short",
+    day: "numeric",
+    month: "short",
+  });
+}
+
+const DAY_MS = 86_400_000;
+
+/**
+ * Split reservations into per-day rows, clipping any booking that crosses
+ * midnight so each day's track only ever holds 0–100% segments.
+ *
+ * @returns {Array<{key: string, label: string, blocks: Array}>}
+ */
+export function splitByDay(reservations) {
+  const days = new Map();
+
+  for (const item of reservations) {
+    const start = new Date(item.start_time);
+    const end = new Date(item.end_time);
+
+    if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) continue;
+
+    let cursor = new Date(start.getFullYear(), start.getMonth(), start.getDate());
+
+    while (cursor < end) {
+      const dayEnd = new Date(cursor.getTime() + DAY_MS);
+      const from = start > cursor ? start : cursor;
+      const to = end < dayEnd ? end : dayEnd;
+
+      const key = `${cursor.getFullYear()}-${cursor.getMonth() + 1}-${cursor.getDate()}`;
+
+      if (!days.has(key)) {
+        days.set(key, { key, label: dayLabel(cursor), sort: cursor.getTime(), blocks: [] });
+      }
+
+      days.get(key).blocks.push({
+        id: `${item.id}-${key}`,
+        reservationId: item.id,
+        status: item.status,
+        leftPct: ((from - cursor) / DAY_MS) * 100,
+        widthPct: Math.max(((to - from) / DAY_MS) * 100, 0.8), // keep hairline slots visible
+        startLabel: timeOnly(item.start_time),
+        endLabel: timeOnly(item.end_time),
+        continuesBefore: start < cursor,
+        continuesAfter: end > dayEnd,
+      });
+
+      cursor = dayEnd;
+    }
+  }
+
+  return [...days.values()].sort((a, b) => a.sort - b.sort);
+}

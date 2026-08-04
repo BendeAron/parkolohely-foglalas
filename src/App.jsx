@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { SquareParking } from "lucide-react";
+import { SquareParking, Ticket } from "lucide-react";
 import TimeRangeBar from "./components/TimeRangeBar";
 import SpotGrid from "./components/SpotGrid";
 import ReservationDrawer from "./components/ReservationDrawer";
+import CancelDrawer from "./components/CancelDrawer";
 import ToastStack from "./components/ToastStack";
 import { createReservation, fetchSpots } from "./api";
-import { defaultRange, readableTime } from "./lib/format";
+import { defaultRange, money, readableTime } from "./lib/format";
 
 export default function App() {
   const [range, setRange] = useState(defaultRange);
@@ -14,6 +15,7 @@ export default function App() {
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(null);
   const [selectedSpot, setSelectedSpot] = useState(null);
+  const [cancelOpen, setCancelOpen] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [toasts, setToasts] = useState([]);
 
@@ -30,24 +32,21 @@ export default function App() {
 
   const rangeInvalid = Boolean(range.start && range.end && range.end <= range.start);
 
-  const load = useCallback(
-    async (windowToCheck) => {
-      setLoading(true);
-      setLoadError(null);
+  const load = useCallback(async (windowToCheck) => {
+    setLoading(true);
+    setLoadError(null);
 
-      try {
-        const body = await fetchSpots(windowToCheck);
-        setSpots(body.data ?? []);
-        setAppliedRange(windowToCheck);
-      } catch (error) {
-        setLoadError(error.message);
-        setSpots([]);
-      } finally {
-        setLoading(false);
-      }
-    },
-    [],
-  );
+    try {
+      const body = await fetchSpots(windowToCheck);
+      setSpots(body.data ?? []);
+      setAppliedRange(windowToCheck);
+    } catch (error) {
+      setLoadError(error.message);
+      setSpots([]);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
 
   // First paint shows the full inventory; availability arrives once a window is checked.
   useEffect(() => {
@@ -71,7 +70,7 @@ export default function App() {
         tone: "success",
         title: "Reserved",
         body: `Bay ${selectedSpot.spot_number} is held for ${payload.license_plate}.`,
-        code: `Reservation #${body.reservation_id} · ${body.total_price}`,
+        code: `Reservation #${body.reservation_id} · ${money(body.total_price)}`,
       });
 
       setSelectedSpot(null);
@@ -100,6 +99,18 @@ export default function App() {
     }
   };
 
+  const handleCancelled = ({ reservationId, spotNumber, refund }) => {
+    pushToast({
+      tone: "success",
+      title: "Cancelled",
+      body: `Bay ${spotNumber} is back on the board.`,
+      code: `Reservation #${reservationId} · ${money(refund)} due back`,
+    });
+
+    // The bay is free again in whatever window is on screen.
+    load(appliedRange);
+  };
+
   const counts = useMemo(() => {
     const free = spots.filter((s) => s.is_available).length;
     return { free, taken: spots.length - free, total: spots.length };
@@ -126,10 +137,24 @@ export default function App() {
             </div>
           </div>
 
-          <div className="flex divide-x divide-[#39424A] border border-[#39424A]">
-            <Tally value={counts.free} label="Free" accent="text-[#4CD07D]" />
-            <Tally value={counts.taken} label="Taken" accent="text-[#E45B5B]" />
-            <Tally value={counts.total} label="Total" accent="text-[#D7DCDE]" />
+          <div className="flex flex-wrap items-center gap-3">
+            <button
+              type="button"
+              onClick={() => setCancelOpen(true)}
+              className="flex items-center gap-2 border border-[#39424A] px-4 py-2.5
+                         font-['Barlow_Condensed'] text-sm font-bold uppercase tracking-[0.14em] text-[#D7DCDE]
+                         transition-colors hover:border-[#E45B5B] hover:text-[#E45B5B]
+                         focus:outline-none focus-visible:ring-2 focus-visible:ring-[#F5C518]"
+            >
+              <Ticket size={14} aria-hidden="true" />
+              My booking
+            </button>
+
+            <div className="flex divide-x divide-[#39424A] border border-[#39424A]">
+              <Tally value={counts.free} label="Free" accent="text-[#4CD07D]" />
+              <Tally value={counts.taken} label="Taken" accent="text-[#E45B5B]" />
+              <Tally value={counts.total} label="Total" accent="text-[#D7DCDE]" />
+            </div>
           </div>
         </div>
       </header>
@@ -177,6 +202,16 @@ export default function App() {
           onSubmit={handleReserve}
         />
       )}
+
+      {cancelOpen && (
+        <CancelDrawer
+          onClose={() => setCancelOpen(false)}
+          onCancelled={handleCancelled}
+          onError={(message) =>
+            pushToast({ tone: "error", title: "Couldn't cancel", body: message })
+          }
+        />
+      )}
     </div>
   );
 }
@@ -196,7 +231,7 @@ function Legend() {
   const items = [
     { color: "bg-[#4CD07D]", label: "Free — tap to book" },
     { color: "bg-[#F5C518]", label: "Selected" },
-    { color: "bg-[#E45B5B]/50", label: "Reserved for this window" },
+    { color: "bg-[#E45B5B]/60", label: "Reserved — tap to see when it frees up" },
   ];
 
   return (
